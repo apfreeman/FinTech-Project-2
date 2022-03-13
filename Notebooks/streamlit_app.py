@@ -67,7 +67,6 @@ with header:
     st.text("Project 2 Fintech Bootcamp")
 
 
-
 def create_alpaca_connection():    
     api = tradeapi.REST(
     alpaca_api_key,
@@ -245,39 +244,115 @@ with dataset1:
     alpaca_secret_key = os.getenv("ALPACA_SECRET_KEY")
     sentiment_df = get_sentiment_df()
     sentiment_df.head()
+    st.dataframe(sentiment_df)
 
     st.header("Sentiment trending")
     sentiment_trending_df = get_sentiment_trending_df()
     sentiment_trending_df.head()
+    st.dataframe(sentiment_trending_df)
 
+    st.header("Visualisations")
+    sentiment_trending_plot_df = sentiment_trending_df.set_index("stock")
+sentiment_trending_plot_df["score"].plot(
+    kind='bar',
+    x='stock',
+    y='score', 
+    title = "Trending Stock Sentiment Scores",
+    figsize=(20,10)
+)
+st.bar_chart(sentiment_trending_plot_df)
+stock_name = pd.DataFrame(sentiment_trending_df['stock'])
+st.dataframe(stock_name.head(3))
 
-with dataset2: 
-    st.header("Social sentiment")
+st.write("Data prep")
+x = sentiment_trending_df.set_index("stock")
+st.dataframe(x)
 
-    soc_sent = pd.read_csv('./Data/sentiment_2022-03-07.csv')
-    st.write(soc_sent)
+st.write("Standardised data")
+x_scaled = StandardScaler().fit_transform(x)
+st.code(x_scaled[0:5])
 
-with dataset3: 
-    st.header("Social sentiment trending")
-    st.text("Top trending stocks from social sentiment")
+pca = PCA(n_components=3)
+sentiment_pca = pca.fit_transform(x_scaled)
+pcs_df = pd.DataFrame(
+    data=sentiment_pca, columns=["PC 1","PC 2","PC 3"], index=x.index
+)
+st.dataframe(pcs_df.head(10))
 
-    sentiment_trending = pd.read_csv('./Data/sentiment_trending_2022-03-07.csv')
-    st.write(sentiment_trending)
-    
-    st.subheader('Top 10 stocks with the highest positive score')
-    positive_score = pd.DataFrame(sentiment_trending['positive_score'].value_counts()).head(10)
-    st.bar_chart(positive_score)
+st.write("K values")
+inertia = []
+k = list(range(1, 11))
 
+# Calculate the inertia for the range of k values
+for i in k:
+    km = KMeans(n_clusters=i, random_state=0)
+    km.fit(pcs_df)
+    inertia.append(km.inertia_)
 
+# Create the Elbow Curve using hvPlot
+elbow_data = {"k": k, "inertia": inertia}
+df_elbow = pd.DataFrame(elbow_data)
+df_elbow.hvplot.line(x="k", y="inertia", title="Elbow Curve", xticks=k)
+st.line_chart(df_elbow)
 
-with features:
-    st.header('The logic behind the algorithim')
+st.header("K-Means model")
 
-    st.markdown("*What we created*")
+# Initialize the K-Means model
+model = KMeans(n_clusters=5, random_state=0)
 
-with model_trading: 
-    st.header("From sentiment to technical")
-    st.text('Here you can explain, etc')
+# Fit the model
+model.fit(pcs_df)
 
-    sel_col, disp_col = st.columns(2)
-    
+# Predict clusters
+predictions = model.predict(pcs_df)
+
+# Create a new DataFrame including predicted clusters and cryptocurrencies features
+clustered_df = pd.DataFrame({
+    "score": x.score,
+    "positive_score": x.positive_score,
+    "negative_score": x.negative_score,
+    "activity": x.activity,
+    "activity_avg_7_days": x.activity_avg_7_days,
+    "activity_avg_14_days": x.activity_avg_14_days,
+    "activity_avg_30_days": x.activity_avg_30_days,
+    "score_avg_7_days": x.score_avg_7_days,
+    "score_avg_14_days": x.score_avg_14_days,
+    "score_avg_30_days": x.score_avg_30_days,
+    "PC 1": pcs_df['PC 1'],
+    "PC 2": pcs_df['PC 2'],
+    "PC 3": pcs_df['PC 3'],
+    "Class": model.labels_,
+    },
+    index=x.index
+)
+st.dataframe(clustered_df.head())
+
+# Plotting the 3D-Scatter with x="PC 1", y="PC 2" and z="PC 3"
+fig = px.scatter_3d(
+    clustered_df,
+    x="PC 1",
+    y="PC 2",
+    z="PC 3",
+    hover_name='score',
+    hover_data= ['activity'],
+    height=600,
+    color="Class"
+)
+st.plotly_chart(fig)
+
+st.write("Top stocks")
+top_stocks = clustered_df.sort_values("score", ascending=False).head(10)  
+# Get all stocks in the top class
+top_class = top_stocks["Class"].mode()
+top_class_stocks = top_stocks.loc[top_stocks["Class"] == top_class[0]]
+st.dataframe(top_class_stocks)
+
+st.title("Technical Analysis")
+portfolio_df = create_technical_analysis_df()
+st.dataframe(portfolio_df.head())
+
+#Note this .drop function automatically moves the 'symbol' column to create a multi-level index once row 6 is dropped from original df
+technicals = portfolio_df[["Stochastic_Ratio","CCI","ATR_Ratio","close"]]
+st.dataframe(technicals.tail())
+
+st.title("Trading Signals")
